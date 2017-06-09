@@ -7,5 +7,4 @@
 
 // REQUIRES: asserts
 // RUN: not --crash %target-swift-frontend %s -emit-ir
-typealias e:a
-struct A:a{}typealias a=A
+protocol P{protocol b:P{{}typealias e:a.a}typealias a

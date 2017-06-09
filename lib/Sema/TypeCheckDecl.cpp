@@ -3830,11 +3830,8 @@ static void validateAbstractStorageDecl(AbstractStorageDecl *ASD,
   if (ASD->hasAccessorFunctions())
     maybeAddMaterializeForSet(ASD, TC);
 
-  if (ASD->isFinal()) {
-    makeFinal(TC.Context, ASD->getGetter());
-    makeFinal(TC.Context, ASD->getSetter());
+  if (ASD->isFinal())
     makeFinal(TC.Context, ASD->getMaterializeForSetFunc());
-  }
 
   if (auto getter = ASD->getGetter())
     TC.validateDecl(getter);
@@ -5170,9 +5167,14 @@ public:
           }
         }
 
-        // If the storage is dynamic, propagate to this accessor.
-        if (isObjC && storage->isDynamic() && !FD->isDynamic())
-          FD->getAttrs().add(new (TC.Context) DynamicAttr(/*implicit*/ true));
+        // If the storage is dynamic or final, propagate to this accessor.
+        if (isObjC &&
+            storage->isDynamic() &&
+            !storage->isFinal())
+          makeDynamic(TC.Context, FD);
+
+        if (storage->isFinal())
+          makeFinal(TC.Context, FD);
       }
 
       Optional<ForeignErrorConvention> errorConvention;
@@ -6138,10 +6140,9 @@ public:
     UNINTERESTING_ATTR(DiscardableResult)
 
     UNINTERESTING_ATTR(ObjCMembers)
+    UNINTERESTING_ATTR(ObjCRuntimeName)
     UNINTERESTING_ATTR(Implements)
-    UNINTERESTING_ATTR(NSKeyedArchiverClassName)
     UNINTERESTING_ATTR(StaticInitializeObjCMetadata)
-    UNINTERESTING_ATTR(NSKeyedArchiverEncodeNonGenericSubclassesOnly)
     UNINTERESTING_ATTR(DowngradeExhaustivityCheck)
 #undef UNINTERESTING_ATTR
 
@@ -6191,10 +6192,7 @@ public:
     }
 
     void visitDynamicAttr(DynamicAttr *attr) {
-      if (!Override->isDynamic())
-        // Dynamic is inherited.
-        Override->getAttrs().add(
-                                new (TC.Context) DynamicAttr(/*implicit*/true));
+      makeDynamic(TC.Context, Override);
     }
 
     void visitObjCAttr(ObjCAttr *attr) {
@@ -7022,6 +7020,13 @@ static Optional<ObjCReason> shouldMarkClassAsObjC(TypeChecker &TC,
 
   if (auto attr = CD->getAttrs().getAttribute<ObjCAttr>()) {
     if (kind == ObjCClassKind::ObjCMembers) {
+      if (attr->hasName() && !CD->isGenericContext()) {
+        // @objc with a name on a non-generic subclass of a generic class is
+        // just controlling the runtime name. Don't diagnose this case.
+        CD->getAttrs().add(new (TC.Context) ObjCRuntimeNameAttr(*attr));
+        return None;
+      }
+
       TC.diagnose(attr->getLocation(), diag::objc_for_generic_class)
         .fixItRemove(attr->getRangeWithAt());
     }
@@ -7403,12 +7408,6 @@ void TypeChecker::validateDecl(ValueDecl *D) {
       // Make sure the getter and setter have valid types, since they will be
       // used by SILGen for any accesses to this variable.
       validateAbstractStorageDecl(VD, *this);
-
-      if (VD->isDynamic()) {
-        makeDynamic(Context, VD->getGetter());
-        makeDynamic(Context, VD->getSetter());
-        // Skip materializeForSet -- it won't be used with a dynamic property.
-      }
     }
 
     break;

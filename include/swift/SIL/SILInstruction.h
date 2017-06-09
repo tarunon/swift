@@ -150,15 +150,12 @@ public:
   /// is already set in when creating an instruction.
   void setDebugLocation(SILDebugLocation Loc) { Location = Loc; }
 
-  /// removeFromParent - This method unlinks 'self' from the containing basic
-  /// block, but does not delete it.
-  ///
-  void removeFromParent();
-
-  /// eraseFromParent - This method unlinks 'self' from the containing basic
-  /// block and deletes it.
-  ///
+  /// This method unlinks 'self' from the containing basic block and deletes it.
   void eraseFromParent();
+
+  /// Unlink this instruction from its current basic block and insert the
+  /// instruction such that it is the first instruction of \p Block.
+  void moveFront(SILBasicBlock *Block);
 
   /// Unlink this instruction from its current basic block and insert it into
   /// the basic block that Later lives in, right before Later.
@@ -170,13 +167,6 @@ public:
 
   /// \brief Drops all uses that belong to this instruction.
   void dropAllReferences();
-
-  /// \brief Replace all uses of this instruction with Undef.
-  ///
-  /// TODO: This should be on ValueBase, but ValueBase currently does not have
-  /// access to a SILModule. If that ever changes, this method should move to
-  /// ValueBase.
-  void replaceAllUsesWithUndef();
 
   /// Return the array of operands for this instruction.
   ArrayRef<Operand> getAllOperands() const;

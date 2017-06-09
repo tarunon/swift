@@ -3286,15 +3286,21 @@ ResolveWitnessResult ConformanceChecker::resolveWitnessViaDefault(
 ///
 /// \returns an empty result on success, or a description of the error.
 static CheckTypeWitnessResult checkTypeWitness(TypeChecker &tc, DeclContext *dc,
+                                               ProtocolDecl *proto,
                                                AssociatedTypeDecl *assocType, 
                                                Type type) {
-  if (auto superclass = assocType->getSuperclass()) {
+  auto *moduleDecl = dc->getParentModule();
+  auto *reqtSig = assocType->getProtocol()->getRequirementSignature();
+  auto *depTy = DependentMemberType::get(proto->getSelfInterfaceType(),
+                                         assocType);
+
+  if (auto superclass = reqtSig->getSuperclassBound(depTy, *moduleDecl)) {
     if (!superclass->isExactSuperclassOf(type))
       return superclass->getAnyNominal();
   }
 
   // Check protocol conformances.
-  for (auto reqProto : assocType->getConformingProtocols()) {
+  for (auto reqProto : reqtSig->getConformsTo(depTy, *moduleDecl)) {
     if (!tc.conformsToProtocol(type, reqProto, dc, None))
       return reqProto;
 
@@ -3323,6 +3329,11 @@ static CheckTypeWitnessResult checkTypeWitness(TypeChecker &tc, DeclContext *dc,
 /// Attempt to resolve a type witness via member name lookup.
 ResolveWitnessResult ConformanceChecker::resolveTypeWitnessViaLookup(
                        AssociatedTypeDecl *assocType) {
+  if (!Proto->isRequirementSignatureComputed()) {
+    Conformance->setInvalid();
+    return ResolveWitnessResult::Missing;
+  }
+
   // Look for a member type with the same name as the associated type.
   auto candidates = TC.lookupMemberType(DC, Adoptee, assocType->getName(),
                                         NameLookupFlags::ProtocolMembers);
@@ -3342,7 +3353,7 @@ ResolveWitnessResult ConformanceChecker::resolveTypeWitnessViaLookup(
         continue;
 
     // Check this type against the protocol requirements.
-    if (auto checkResult = checkTypeWitness(TC, DC, assocType, 
+    if (auto checkResult = checkTypeWitness(TC, DC, Proto, assocType,
                                             candidate.second)) {
       auto reqProto = checkResult.getProtocolOrClass();
       nonViable.push_back({candidate.first, reqProto});
@@ -3603,7 +3614,7 @@ ConformanceChecker::inferTypeWitnessesViaValueWitnesses(
       if (!canInferFromOtherAssociatedType) {
         // Check that the type witness meets the
         // requirements on the associated type.
-        if (auto failed = checkTypeWitness(TC, DC, result.first,
+        if (auto failed = checkTypeWitness(TC, DC, Proto, result.first,
                                            result.second)) {
           witnessResult.NonViable.push_back(
                               std::make_tuple(result.first,result.second,failed));
@@ -4189,14 +4200,20 @@ void ConformanceChecker::resolveTypeWitnesses() {
     }
 
     TC.validateDecl(assocType);
-    Type defaultType = assocType->getDefaultDefinitionLoc().getType().subst(
+    Type defaultType = assocType->getDefaultDefinitionLoc().getType();
+
+    // FIXME: Circularity
+    if (!defaultType)
+      return Type();
+
+    defaultType = defaultType.subst(
         QueryTypeSubstitutionMap{substitutions},
         LookUpConformanceInModule(DC->getParentModule()));
 
     if (!defaultType)
       return Type();
 
-    if (auto failed = checkTypeWitness(TC, DC, assocType, defaultType)) {
+    if (auto failed = checkTypeWitness(TC, DC, Proto, assocType, defaultType)) {
       // Record the failure, if we haven't seen one already.
       if (!failedDefaultedAssocType) {
         failedDefaultedAssocType = assocType;
@@ -4231,7 +4248,7 @@ void ConformanceChecker::resolveTypeWitnesses() {
       return Type();
 
     // Make sure that the derived type is sane.
-    if (checkTypeWitness(TC, DC, assocType, derivedType)) {
+    if (checkTypeWitness(TC, DC, Proto, assocType, derivedType)) {
       diagnoseOrDefer(assocType, true,
         [derivedType](NormalProtocolConformance *conformance) {
           // FIXME: give more detail here?
@@ -6019,6 +6036,9 @@ static bool isNSCoding(ProtocolDecl *protocol) {
 
 /// Whether the given class has an explicit '@objc' name.
 static bool hasExplicitObjCName(ClassDecl *classDecl) {
+  if (classDecl->getAttrs().hasAttribute<ObjCRuntimeNameAttr>())
+    return true;
+
   auto objcAttr = classDecl->getAttrs().getAttribute<ObjCAttr>();
   if (!objcAttr) return false;
 
@@ -6040,26 +6060,17 @@ static bool hasGenericAncestry(ClassDecl *classDecl) {
 
 /// Infer the attribute tostatic-initialize the Objective-C metadata for the
 /// given class, if needed.
-static void inferStaticInitializeObjCMetadata(ClassDecl *classDecl,
-                                              bool requiresNSCodingAttr) {
+static void inferStaticInitializeObjCMetadata(ClassDecl *classDecl) {
   // If we already have the attribute, there's nothing to do.
   if (classDecl->getAttrs().hasAttribute<StaticInitializeObjCMetadataAttr>())
     return;
 
-  // A class with the @NSKeyedArchiverClassNameAttr will end up getting registered
-  // with the Objective-C runtime anyway.
-  if (classDecl->getAttrs().hasAttribute<NSKeyedArchiverClassNameAttr>())
-    return;
-
-  // A class with @NSKeyedArchiverEncodeNonGenericSubclassesOnly promises not to be archived,
-  // so don't static-initialize its Objective-C metadata.
-  if (classDecl->getAttrs().hasAttribute<NSKeyedArchiverEncodeNonGenericSubclassesOnlyAttr>())
-    return;
-
   // If we know that the Objective-C metadata will be statically registered,
   // there's nothing to do.
-  if (!requiresNSCodingAttr && !hasGenericAncestry(classDecl))
+  if (!hasGenericAncestry(classDecl) &&
+      classDecl->getDeclContext()->isModuleScopeContext()) {
     return;
+  }
 
   // Infer @_staticInitializeObjCMetadata.
   ASTContext &ctx = classDecl->getASTContext();
@@ -6118,27 +6129,30 @@ void TypeChecker::checkConformancesInContext(DeclContext *dc,
     // have unstable archival names.
     if (auto classDecl = dc->getAsClassOrClassExtensionContext()) {
       if (Context.LangOpts.EnableObjCInterop &&
-          isNSCoding(conformance->getProtocol())) {
+          isNSCoding(conformance->getProtocol()) &&
+          !classDecl->isGenericContext()) {
         // Note: these 'kind' values are synchronized with
         // diag::nscoding_unstable_mangled_name.
-        Optional<unsigned> kind;
-        bool isFixable = true;
-        if (classDecl->getGenericSignature()) {
-          kind = 4;
-          isFixable = false;
-        } else if (!classDecl->getDeclContext()->isModuleScopeContext()) {
+        enum class UnstableNameKind : unsigned {
+          Private = 0,
+          FilePrivate,
+          Nested,
+          Local,
+        };
+        Optional<UnstableNameKind> kind;
+        if (!classDecl->getDeclContext()->isModuleScopeContext()) {
           if (classDecl->getDeclContext()->isTypeContext())
-            kind = 2;
+            kind = UnstableNameKind::Nested;
           else
-            kind = 3;
+            kind = UnstableNameKind::Local;
         } else {
           switch (classDecl->getFormalAccess()) {
           case Accessibility::FilePrivate:
-            kind = 1;
+            kind = UnstableNameKind::FilePrivate;
             break;
 
           case Accessibility::Private:
-            kind = 0;
+            kind = UnstableNameKind::Private;
             break;
 
           case Accessibility::Internal:
@@ -6149,46 +6163,33 @@ void TypeChecker::checkConformancesInContext(DeclContext *dc,
         }
 
         if (kind && getLangOpts().EnableNSKeyedArchiverDiagnostics &&
-            !hasExplicitObjCName(classDecl) &&
-            !classDecl->getAttrs().hasAttribute<NSKeyedArchiverClassNameAttr>() &&
-            !classDecl->getAttrs()
-              .hasAttribute<NSKeyedArchiverEncodeNonGenericSubclassesOnlyAttr>()) {
-          SourceLoc loc;
-          if (auto normal = dyn_cast<NormalProtocolConformance>(conformance))
-            loc = normal->getLoc();
-          if (loc.isInvalid())
-            loc = currentDecl->getLoc();
-
+            isa<NormalProtocolConformance>(conformance) &&
+            !hasExplicitObjCName(classDecl)) {
           bool emitWarning = Context.LangOpts.isSwiftVersion3();
-          diagnose(loc,
+          diagnose(cast<NormalProtocolConformance>(conformance)->getLoc(),
                    emitWarning ? diag::nscoding_unstable_mangled_name_warn
                                : diag::nscoding_unstable_mangled_name,
-                   *kind, classDecl->TypeDecl::getDeclaredInterfaceType());
+                   static_cast<unsigned>(kind.getValue()),
+                   classDecl->getDeclaredInterfaceType());
           auto insertionLoc =
             classDecl->getAttributeInsertionLoc(/*forModifier=*/false);
-          if (isFixable) {
-            // Note: this is intentionally using the Swift 3 mangling,
-            // to provide compatibility with archives created in the Swift 3
-            // time frame.
-            Mangle::ASTMangler mangler;
-            diagnose(classDecl, diag::unstable_mangled_name_add_objc)
-              .fixItInsert(insertionLoc,
-                           "@objc(<#Objective-C class name#>)");
-            diagnose(classDecl,
-                     diag::unstable_mangled_name_add_NSKeyedArchiverClassName)
-              .fixItInsert(insertionLoc,
-                           "@NSKeyedArchiverClassName(\"" +
-                           mangler.mangleObjCRuntimeName(classDecl) +
-                           "\")");
-          } else {
-            diagnose(classDecl, diag::add_NSKeyedArchiverEncodeNonGenericSubclassesOnly_attr,
-                     classDecl->getDeclaredInterfaceType())
-              .fixItInsert(insertionLoc, "@NSKeyedArchiverEncodeNonGenericSubclassesOnly");
-          }
+          // Note: this is intentionally using the Swift 3 mangling,
+          // to provide compatibility with archives created in the Swift 3
+          // time frame.
+          Mangle::ASTMangler mangler;
+          std::string mangledName = mangler.mangleObjCRuntimeName(classDecl);
+          assert(Lexer::isIdentifier(mangledName) &&
+                 "mangled name is not an identifier; can't use @objc");
+          diagnose(classDecl, diag::unstable_mangled_name_add_objc)
+            .fixItInsert(insertionLoc,
+                         "@objc(" + mangledName + ")");
+          diagnose(classDecl, diag::unstable_mangled_name_add_objc_new)
+            .fixItInsert(insertionLoc,
+                         "@objc(<#prefixed Objective-C class name#>)");
         }
 
         // Infer @_staticInitializeObjCMetadata if needed.
-        inferStaticInitializeObjCMetadata(classDecl, kind.hasValue());
+        inferStaticInitializeObjCMetadata(classDecl);
       }
     }
   }

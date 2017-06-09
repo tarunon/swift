@@ -7,4 +7,4 @@
 
 // REQUIRES: asserts
 // RUN: not --crash %target-swift-frontend %s -emit-ir
-{class a:P{{}typealias a:Self.a}protocol P{typealias a
+protocol P{{}func a{}typealias e}struct A:P{typealias e:Self.a{}typealias e:Self.a{}typealias e:P
