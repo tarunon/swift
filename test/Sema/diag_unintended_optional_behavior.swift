@@ -83,23 +83,3 @@ func warnCollectionOfAny(_ a: [Int?], _ d: [String : Int?]) {
   // expected-note@-6 {{force-unwrap the value to avoid this warning}}{{37-37=!}}
   // expected-note@-7 {{explicitly cast to Any with 'as Any' to silence this warning}}{{37-37= as Any}}
 }
-
-func warnOptionalInStringInterpolationSegment(_ o : Int?) {
-  print("Always some, Always some, Always some: \(o)")
-  // expected-warning@-1 {{string interpolation produces a debug description for an optional value; did you mean to make this explicit?}}
-  // expected-note@-2 {{use 'String(describing:)' to silence this warning}} {{51-51=String(describing: }} {{52-52=)}} 
-  // expected-note@-3 {{provide a default value to avoid this warning}} {{52-52= ?? <#default value#>}}
-  var i: Int? = o
-  print("Always some, Always some, Always some: \(i)")
-  // expected-warning@-1 {{string interpolation produces a debug description for an optional value; did you mean to make this explicit?}}
-  // expected-note@-2 {{use 'String(describing:)' to silence this warning}} {{51-51=String(describing: }} {{52-52=)}}
-  // expected-note@-3 {{provide a default value to avoid this warning}} {{52-52= ?? <#default value#>}}
-  i = nil
-  print("Always some, Always some, Always some: \(o.map { $0 + 1 })")
-  // expected-warning@-1 {{string interpolation produces a debug description for an optional value; did you mean to make this explicit?}}
-  // expected-note@-2 {{use 'String(describing:)' to silence this warning}} {{51-51=String(describing: }} {{67-67=)}} 
-  // expected-note@-3 {{provide a default value to avoid this warning}} {{67-67= ?? <#default value#>}}
-
-  print("Always some, Always some, Always some: \(o as Int?)") // No warning
-  print("Always some, Always some, Always some: \(o.debugDescription)") // No warning.
-}

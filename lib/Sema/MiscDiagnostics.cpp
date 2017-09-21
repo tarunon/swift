@@ -3314,6 +3314,56 @@ checkImplicitPromotionsInCondition(const StmtConditionElement &cond,
   }
 }
 
+static void diagnousUnintendedDebugStringBehavior(TypeChecker &TC, const Expr *E,
+                                               DeclContext *DC) {
+    if (!E || isa<ErrorExpr>(E) || !E->getType())
+        return;
+    class UnintendedDebugStringBehavior : public ASTWalker {
+        TypeChecker &TC;
+        DeclContext *DC;
+        SmallPtrSet<Expr *, 4> ErasureCoercedToAny;
+
+        std::pair<bool, Expr *> walkToExprPre(Expr *E) override {
+            if (!E || isa<ErrorExpr>(E) || !E->getType())
+                return { false, E };
+
+            if (auto *CE = dyn_cast<AbstractClosureExpr>(E))
+                if (!CE->hasSingleExpressionBody())
+                    return { false, E };
+
+            if (auto *literal = dyn_cast<InterpolatedStringLiteralExpr>(E)) {
+
+                // Warn about interpolated segments that contain optionals.
+                for (auto &segment : literal->getSegments()) {
+                    // Bail out if we have customstringconvertible.
+                    auto proto = DC->getASTContext().getProtocol(KnownProtocolKind::CustomStringConvertible);
+                    if (TC.conformsToProtocol(segment->getType()->getRValueType(), proto, DC, ConformanceCheckFlags::Used)) {
+                        continue;
+                    }
+
+                    TC.diagnose(segment->getStartLoc(),
+                                diag::debug_description_in_string_interpolation_segment, segment->getType())
+                    .highlight(segment->getSourceRange());
+
+                    // Suggest 'String(describing: <expr>)'.
+                    auto segmentStart = segment->getStartLoc().getAdvancedLoc(1);
+                    TC.diagnose(segment->getLoc(),
+                                diag::silence_optional_in_interpolation_segment_call)
+                    .highlight(segment->getSourceRange())
+                    .fixItInsert(segmentStart, "String(describing: ")
+                    .fixItInsert(segment->getEndLoc(), ")");
+                }
+            }
+            return { true, E };
+    }
+    public:
+        UnintendedDebugStringBehavior(TypeChecker &tc, DeclContext *dc) : TC(tc), DC(dc) { }
+    };
+
+    UnintendedDebugStringBehavior Walker(TC, DC);
+    const_cast<Expr *>(E)->walk(Walker);
+}
+
 static void diagnoseUnintendedOptionalBehavior(TypeChecker &TC, const Expr *E,
                                                const DeclContext *DC) {
   if (!E || isa<ErrorExpr>(E) || !E->getType())
@@ -3353,38 +3403,6 @@ static void diagnoseUnintendedOptionalBehavior(TypeChecker &TC, const Expr *E,
               .highlight(subExpr->getSourceRange())
               .fixItInsertAfter(subExpr->getEndLoc(), " as Any");
         }
-      } else if (auto *literal = dyn_cast<InterpolatedStringLiteralExpr>(E)) {
-        // Warn about interpolated segments that contain optionals.
-        for (auto &segment : literal->getSegments()) {
-          // Allow explicit casts.
-          if (auto paren = dyn_cast<ParenExpr>(segment)) {
-            if (isa<ExplicitCastExpr>(paren->getSubExpr())) {
-              continue;
-            }
-          }
-
-          // Bail out if we don't have an optional.
-          if (!segment->getType()->getRValueType()->getOptionalObjectType()) {
-            continue;
-          }
-
-          TC.diagnose(segment->getStartLoc(),
-                      diag::optional_in_string_interpolation_segment)
-              .highlight(segment->getSourceRange());
-
-          // Suggest 'String(describing: <expr>)'.
-          auto segmentStart = segment->getStartLoc().getAdvancedLoc(1);
-          TC.diagnose(segment->getLoc(),
-                      diag::silence_optional_in_interpolation_segment_call)
-            .highlight(segment->getSourceRange())
-            .fixItInsert(segmentStart, "String(describing: ")
-            .fixItInsert(segment->getEndLoc(), ")");
-
-          // Suggest inserting a default value. 
-          TC.diagnose(segment->getLoc(), diag::default_optional_to_any)
-            .highlight(segment->getSourceRange())
-            .fixItInsert(segment->getEndLoc(), " ?? <#default value#>");
-        }
       }
       return { true, E };
     }
@@ -3409,6 +3427,7 @@ void swift::performSyntacticExprDiagnostics(TypeChecker &TC, const Expr *E,
   diagSyntacticUseRestrictions(TC, E, DC, isExprStmt);
   diagRecursivePropertyAccess(TC, E, DC);
   diagnoseImplicitSelfUseInClosure(TC, E, DC);
+  diagnousUnintendedDebugStringBehavior(TC, E, const_cast<DeclContext*>(DC));
   diagnoseUnintendedOptionalBehavior(TC, E, DC);
   if (!TC.getLangOpts().DisableAvailabilityChecking)
     diagAvailability(TC, E, const_cast<DeclContext*>(DC));

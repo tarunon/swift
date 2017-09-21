@@ -10,7 +10,7 @@ class Animal {
   required init(species: String) {}
 
   static func create() -> Self { return self.init() }
-  required convenience init() { self.init(species: "\(type(of: self))") }
+  required convenience init() { self.init(species: String(describing: type(of: self))) }
 }
 
 class Dog: Animal, BestFriend {}
