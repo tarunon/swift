@@ -2295,7 +2295,7 @@ static bool matches(CanType t1, CanType t2, TypeMatchOptions matchMode,
 
   // Class-to-class.
   if (matchMode.contains(TypeMatchFlags::AllowOverride))
-    if (t2->isExactSuperclassOf(t1))
+    if (t2->isExactSuperclassOf(t1) || t1 == t2.getOptionalObjectType())
       return true;
 
   if (matchMode.contains(TypeMatchFlags::AllowABICompatible))
