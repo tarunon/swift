@@ -2210,7 +2210,7 @@ static bool matches(CanType t1, CanType t2, TypeMatchOptions matchMode,
 
   // First try unwrapping optionals.
   // Make sure we only unwrap at most one layer of optional.
-  if (insideOptional == OptionalUnwrapping::None) {
+  if (insideOptional == OptionalUnwrapping::None || insideOptional == OptionalUnwrapping::OptionalToOptional) {
     // Value-to-optional and optional-to-optional.
     if (auto obj2 = t2.getOptionalObjectType()) {
       // Optional-to-optional.
@@ -2295,7 +2295,7 @@ static bool matches(CanType t1, CanType t2, TypeMatchOptions matchMode,
 
   // Class-to-class.
   if (matchMode.contains(TypeMatchFlags::AllowOverride))
-    if (t2->isExactSuperclassOf(t1) || t1 == t2.getOptionalObjectType())
+    if (t2->isExactSuperclassOf(t1))
       return true;
 
   if (matchMode.contains(TypeMatchFlags::AllowABICompatible))
