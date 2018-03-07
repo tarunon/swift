@@ -6,20 +6,28 @@ class A {
   func ret_subclass_rev() -> B { return B() }
   func ret_nonclass_optional() -> Int? { return .none }
   func ret_nonclass_optional_rev() -> Int { return 0 }
+  func ret_nonclass_nested_optional() -> Int?? { return .none }
+  func ret_nonclass_nested_optional_rev() -> Int? { return 0 }
   func ret_class_optional() -> B? { return .none }
   func ret_class_optional_rev() -> A { return self }
+  func ret_class_nested_optional() -> B?? { return .none }
+  func ret_class_nested_optional_rev() -> A? { return self }
   func ret_class_uoptional() -> B! { return B() }
   func ret_class_uoptional_rev() -> A { return self }
   func ret_class_optional_uoptional() -> B? { return .none }
   func ret_class_optional_uoptional_rev() -> A! { return self }
-
+  
   func param_sametype(_ x : Int) {}
   func param_subclass(_ x : B) {}
   func param_subclass_rev(_ x : A) {}
   func param_nonclass_optional(_ x : Int) {}
   func param_nonclass_optional_rev(_ x : Int?) {}
+  func param_nonclass_nested_optional(_ x : Int?) {}
+  func param_nonclass_nested_optional_rev(_ x : Int??) {}
   func param_class_optional(_ x : B) {}
   func param_class_optional_rev(_ x : B?) {}
+  func param_class_nested_optional(_ x : B?) {}
+  func param_class_nested_optional_rev(_ x : B??) {}
   func param_class_uoptional(_ x : B) {}
   func param_class_uoptional_rev(_ x : B!) {}
   func param_class_optional_uoptional(_ x : B!) {}
@@ -32,8 +40,12 @@ class B : A {
   func ret_subclass_rev() -> A { return self }
   override func ret_nonclass_optional() -> Int { return 0 }
   func ret_nonclass_optional_rev() -> Int? { return 0 }
+  override func ret_nonclass_nested_optional() -> Int? { return 0 }
+  func ret_nonclass_nested_optional_rev() -> Int?? { return 0 }
   override func ret_class_optional() -> B { return self }
   func ret_class_optional_rev() -> A? { return self }
+  override func ret_class_nested_optional() -> B? { return self }
+  func ret_class_nested_optional_rev() -> A?? { return self }
   override func ret_class_uoptional() -> B { return self }
   func ret_class_uoptional_rev() -> A! { return self }
   override func ret_class_optional_uoptional() -> B! { return self }
@@ -44,8 +56,12 @@ class B : A {
   func param_subclass_rev(_ x : B) {}
   override func param_nonclass_optional(_ x : Int?) {}
   func param_nonclass_optional_rev(_ x : Int) {}
+  override func param_nonclass_nested_optional(_ x : Int??) {}
+  func param_nonclass_nested_optional_rev(_ x : Int?) {}
   override func param_class_optional(_ x : B?) {}
   func param_class_optional_rev(_ x : B) {}
+  override func param_class_nested_optional(_ x : B??) {}
+  func param_class_nested_optional_rev(_ x : B?) {}
   override func param_class_uoptional(_ x : B!) {}
   func param_class_uoptional_rev(_ x : B) {}
   override func param_class_optional_uoptional(_ x : B?) {}
@@ -66,8 +82,12 @@ class E {
   var var_subclass_rev: F { get { return F() } set {} } // expected-note{{attempt to override property here}}
   var var_nonclass_optional: Int? { get { return .none } set {} } // expected-note{{attempt to override property here}}
   var var_nonclass_optional_rev: Int { get { return 0 } set {} } // expected-note{{attempt to override property here}}
+  var var_nonclass_nested_optional: Int?? { get { return .none } set {} } // expected-note{{attempt to override property here}}
+  var var_nonclass_nested_optional_rev: Int? { get { return 0 } set {} } // expected-note{{attempt to override property here}}
   var var_class_optional: F? { get { return .none } set {} } // expected-note{{attempt to override property here}}
   var var_class_optional_rev: E { get { return self } set {} } // expected-note{{attempt to override property here}}
+  var var_class_nested_optional: F? { get { return .none } set {} } // expected-note{{attempt to override property here}}
+  var var_class_nested_optional_rev: E { get { return self } set {} } // expected-note{{attempt to override property here}}
   var var_class_uoptional: F! { get { return F() } set {} } // expected-note{{attempt to override property here}}
   var var_class_uoptional_rev: E { get { return self } set {} } // expected-note{{attempt to override property here}}
   var var_class_optional_uoptional: F? { get { return .none } set {} }
@@ -78,8 +98,12 @@ class E {
   var ro_subclass_rev: F { return F() }
   var ro_nonclass_optional: Int? { return 0 }
   var ro_nonclass_optional_rev: Int { return 0 } // expected-note{{attempt to override property here}}
+  var ro_nonclass_nested_optional: Int?? { return 0 }
+  var ro_nonclass_nested_optional_rev: Int? { return 0 } // expected-note{{attempt to override property here}}
   var ro_class_optional: F? { return .none }
   var ro_class_optional_rev: E { return self } // expected-note{{attempt to override property here}}
+  var ro_class_nested_optional: F?? { return .none }
+  var ro_class_nested_optional_rev: E? { return self } // expected-note{{attempt to override property here}}
   var ro_class_uoptional: F! { return F() }
   var ro_class_uoptional_rev: E { return self } // expected-note{{attempt to override property here}}
   var ro_class_optional_uoptional: F? { return .none }
@@ -92,8 +116,12 @@ class F : E {
   override var var_subclass_rev: E { get { return F() } set {} } // expected-error{{property 'var_subclass_rev' with type 'E' cannot override a property with type 'F}}
   override var var_nonclass_optional: Int { get { return 0 } set {} } // expected-error{{cannot override mutable property 'var_nonclass_optional' of type 'Int?' with covariant type 'Int'}}
   override var var_nonclass_optional_rev: Int? { get { return 0 } set {} } // expected-error{{property 'var_nonclass_optional_rev' with type 'Int?' cannot override a property with type 'Int'}}
+  override var var_nonclass_nested_optional: Int? { get { return 0 } set {} } // expected-error{{cannot override mutable property 'var_nonclass_optional' of type 'Int?' with covariant type 'Int'}}
+  override var var_nonclass_nested_optional_rev: Int?? { get { return 0 } set {} } // expected-error{{property 'var_nonclass_optional_rev' with type 'Int?' cannot override a property with type 'Int'}}
   override var var_class_optional: F { get { return self } set {} } // expected-error{{cannot override mutable property 'var_class_optional' of type 'F?' with covariant type 'F'}}
   override var var_class_optional_rev: E? { get { return self } set {} } // expected-error{{property 'var_class_optional_rev' with type 'E?' cannot override a property with type 'E'}}
+  override var var_class_nested_optional: F? { get { return self } set {} } // expected-error{{cannot override mutable property 'var_class_optional' of type 'F?' with covariant type 'F'}}
+  override var var_class_nested_optional_rev: E?? { get { return self } set {} } // expected-error{{property 'var_class_optional_rev' with type 'E?' cannot override a property with type 'E'}}
   override var var_class_uoptional: F { get { return F() } set {} } // expected-error{{cannot override mutable property 'var_class_uoptional' of type 'F?' with covariant type 'F'}}
   override var var_class_uoptional_rev: E! { get { return self }  set {} } // expected-error{{property 'var_class_uoptional_rev' with type 'E?' cannot override a property with type 'E'}}
   override var var_class_optional_uoptional: F! { get { return .none } set {} }
@@ -104,8 +132,12 @@ class F : E {
   override var ro_subclass_rev: F { return F() }
   override var ro_nonclass_optional: Int { return 0 }
   override var ro_nonclass_optional_rev: Int? { return 0 } // expected-error{{property 'ro_nonclass_optional_rev' with type 'Int?' cannot override a property with type 'Int'}}
+  override var ro_nonclass_nested_optional: Int? { return 0 }
+  override var ro_nonclass_nested_optional_rev: Int?? { return 0 } // expected-error{{property 'ro_nonclass_optional_rev' with type 'Int?' cannot override a property with type 'Int'}}
   override var ro_class_optional: F { return self }
   override var ro_class_optional_rev: E? { return self } // expected-error{{property 'ro_class_optional_rev' with type 'E?' cannot override a property with type 'E'}}
+  override var ro_class_nested_optional: F? { return self }
+  override var ro_class_nested_optional_rev: E?? { return self } // expected-error{{property 'ro_class_optional_rev' with type 'E?' cannot override a property with type 'E'}}
   override var ro_class_uoptional: F { return F() }
   override var ro_class_uoptional_rev: E! { return self } // expected-error{{property 'ro_class_uoptional_rev' with type 'E?' cannot override a property with type 'E'}}
   override var ro_class_optional_uoptional: F! { return .none }
